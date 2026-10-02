@@ -14,6 +14,7 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
 
@@ -25,15 +26,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-
   const [cooldown, setCooldown] = useState(0);
 
-  // OTP cooldown timer
   useEffect(() => {
-    if (cooldown <= 0) return;
+    if (cooldown <= 0) {
+      return;
+    }
 
     const timer = setInterval(() => {
-      setCooldown((current) => Math.max(0, current - 1));
+      setCooldown((value) => Math.max(0, value - 1));
     }, 1000);
 
     return () => clearInterval(timer);
@@ -48,8 +49,8 @@ export default function LoginPage() {
     setMessage("");
   }
 
-  async function upsertProfile(userId) {
-    const { error } = await supabase
+  async function saveProfile(userId) {
+    const { error: profileError } = await supabase
       .from("users")
       .update({
         full_name: fullName || null,
@@ -59,149 +60,41 @@ export default function LoginPage() {
       })
       .eq("id", userId);
 
-    return error;
+    return profileError;
   }
 
-  // -----------------------------
-  // SEND OTP
-  // -----------------------------
-  async function handleSendOtp(e) {
-    e.preventDefault();
-
-    if (!email) {
-      setError("Please enter your email address.");
-      return;
-    }
-
-    if (cooldown > 0) return;
+  async function handlePasswordSignIn(event) {
+    event.preventDefault();
 
     clearMessages();
-    setLoading(true);
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: mode === "signup",
-      },
-    });
-
-    setLoading(false);
-
-    if (error) {
-      setError(error.message);
-      return;
-    }
-
-    setOtpSent(true);
-    startCooldown();
-    setMessage("We sent a 6-digit code to your email.");
-  }
-
-  // -----------------------------
-  // VERIFY OTP
-  // -----------------------------
-  async function handleVerifyOtp(e) {
-    e.preventDefault();
-
-    if (!otp || otp.length < 6) {
-      setError("Please enter the 6-digit OTP.");
-      return;
-    }
-
-    clearMessages();
-    setLoading(true);
-
-    const { data, error } = await supabase.auth.verifyOtp({
-      email,
-      token: otp,
-      type: "email",
-    });
-
-    if (error) {
-      setLoading(false);
-      setError(error.message);
-      return;
-    }
-
-    const userId = data?.user?.id || data?.session?.user?.id;
-
-    if (!data?.session || !userId) {
-      setLoading(false);
-      setError(
-        "OTP verified, but a session could not be created. Please try again."
-      );
-      return;
-    }
-
-    // Save profile information after signup
-    if (mode === "signup") {
-      const profileError = await upsertProfile(userId);
-
-      if (profileError) {
-        setLoading(false);
-        setError(
-          "Account created, but profile information could not be saved: " +
-            profileError.message
-        );
-        return;
-      }
-
-      // If password was entered, also save it
-      if (password) {
-        const { error: passwordError } =
-          await supabase.auth.updateUser({
-            password,
-          });
-
-        if (passwordError) {
-          setLoading(false);
-          setError(
-            "Signed in, but saving password failed: " +
-              passwordError.message
-          );
-          return;
-        }
-      }
-    }
-
-    setLoading(false);
-    router.push("/");
-  }
-
-  // -----------------------------
-  // PASSWORD SIGN IN
-  // -----------------------------
-  async function handlePasswordSignIn(e) {
-    e.preventDefault();
 
     if (!email || !password) {
       setError("Please enter your email and password.");
       return;
     }
 
-    clearMessages();
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error: loginError } =
+      await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
     setLoading(false);
 
-    if (error) {
-      setError(error.message);
+    if (loginError) {
+      setError(loginError.message);
       return;
     }
 
     router.push("/");
   }
 
-  // -----------------------------
-  // PASSWORD SIGN UP
-  // -----------------------------
-  async function handlePasswordSignUp(e) {
-    e.preventDefault();
+  async function handlePasswordSignUp(event) {
+    event.preventDefault();
+
+    clearMessages();
 
     if (!email || !password) {
       setError("Please enter your email and password.");
@@ -213,95 +106,178 @@ export default function LoginPage() {
       return;
     }
 
-    clearMessages();
     setLoading(true);
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    const { data, error: signupError } =
+      await supabase.auth.signUp({
+        email,
+        password,
+      });
 
-    setLoading(false);
-
-    if (error) {
-      setError(error.message);
+    if (signupError) {
+      setLoading(false);
+      setError(signupError.message);
       return;
     }
 
-    startCooldown();
-
-    if (data?.session?.user) {
-      const profileError = await upsertProfile(
+    if (data && data.session && data.session.user) {
+      const profileError = await saveProfile(
         data.session.user.id
       );
 
       if (profileError) {
+        setLoading(false);
         setError(
-          "Account created, but profile information could not be saved: " +
+          "Account created, but profile could not be saved: " +
             profileError.message
         );
         return;
       }
 
+      setLoading(false);
       router.push("/");
-    } else {
-      setMessage(
-        "Account created. Please check your email to confirm your address, then sign in."
-      );
-    }
-  }
-
-  // -----------------------------
-  // FORGOT PASSWORD
-  // -----------------------------
-  async function handleForgotPassword() {
-    if (!email) {
-      setError(
-        "Enter your email above first, then tap 'Forgot password'."
-      );
       return;
     }
 
-    if (cooldown > 0) return;
+    setLoading(false);
+    setMessage(
+      "Account created. Please check your email and confirm your account."
+    );
+  }
+
+  async function handleSendOtp(event) {
+    event.preventDefault();
 
     clearMessages();
+
+    if (!email) {
+      setError("Please enter your email address.");
+      return;
+    }
+
+    if (cooldown > 0) {
+      return;
+    }
+
     setLoading(true);
 
-    const { error } =
-      await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo:
-          typeof window !== "undefined"
-            ? `${window.location.origin}/reset-password`
-            : undefined,
+    const { error: otpError } =
+      await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: mode === "signup",
+        },
       });
 
     setLoading(false);
 
-    if (error) {
-      setError(error.message);
+    if (otpError) {
+      setError(otpError.message);
+      return;
+    }
+
+    setOtpSent(true);
+    startCooldown();
+
+    setMessage("A 6-digit OTP has been sent to your email.");
+  }
+
+  async function handleVerifyOtp(event) {
+    event.preventDefault();
+
+    clearMessages();
+
+    if (!email) {
+      setError("Email is required.");
+      return;
+    }
+
+    if (otp.length !== 6) {
+      setError("Please enter the 6-digit OTP.");
+      return;
+    }
+
+    setLoading(true);
+
+    const { data, error: verifyError } =
+      await supabase.auth.verifyOtp({
+        email,
+        token: otp,
+        type: "email",
+      });
+
+    if (verifyError) {
+      setLoading(false);
+      setError(verifyError.message);
+      return;
+    }
+
+    const userId =
+      data?.user?.id || data?.session?.user?.id;
+
+    if (!data?.session || !userId) {
+      setLoading(false);
+      setError(
+        "OTP verified, but login session could not be created."
+      );
+      return;
+    }
+
+    if (mode === "signup") {
+      const profileError = await saveProfile(userId);
+
+      if (profileError) {
+        setLoading(false);
+        setError(
+          "Account created, but profile could not be saved: " +
+            profileError.message
+        );
+        return;
+      }
+    }
+
+    setLoading(false);
+    router.push("/");
+  }
+
+  async function handleForgotPassword() {
+    clearMessages();
+
+    if (!email) {
+      setError(
+        "Enter your email first, then tap Forgot Password."
+      );
+      return;
+    }
+
+    if (cooldown > 0) {
+      return;
+    }
+
+    setLoading(true);
+
+    const { error: resetError } =
+      await supabase.auth.resetPasswordForEmail(email);
+
+    setLoading(false);
+
+    if (resetError) {
+      setError(resetError.message);
       return;
     }
 
     startCooldown();
-    setMessage(
-      "Password reset email sent. Please check your inbox."
-    );
+    setMessage("Password reset email sent.");
   }
 
-  // -----------------------------
-  // SWITCH MODE
-  // -----------------------------
-  function switchMode(newMode) {
+  function changeMode(newMode) {
     setMode(newMode);
     setOtpSent(false);
     setOtp("");
     clearMessages();
   }
 
-  // -----------------------------
-  // SWITCH METHOD
-  // -----------------------------
-  function switchMethod(newMethod) {
+  function changeMethod(newMethod) {
     setMethod(newMethod);
     setOtpSent(false);
     setOtp("");
@@ -310,9 +286,11 @@ export default function LoginPage() {
 
   return (
     <div className="max-w-md mx-auto bg-white border rounded-xl p-6 mt-6 shadow-sm">
-      {/* Header */}
+
       <div className="text-center mb-5">
-        <div className="text-3xl mb-2">✉️</div>
+        <div className="text-3xl mb-2">
+          ✉️
+        </div>
 
         <h1 className="text-xl font-bold text-navy">
           Welcome to CampusOpps
@@ -323,108 +301,120 @@ export default function LoginPage() {
         </p>
       </div>
 
-      {/* Sign In / Sign Up */}
       <div className="flex mb-4 rounded-md overflow-hidden border">
+
         <button
           type="button"
-          className={`flex-1 py-2 text-sm ${
-            mode === "signin"
+          className={
+            "flex-1 py-2 text-sm " +
+            (mode === "signin"
               ? "bg-gray-100 font-semibold"
-              : "bg-white"
-          }`}
-          onClick={() => switchMode("signin")}
+              : "bg-white")
+          }
+          onClick={() => changeMode("signin")}
         >
           Sign In
         </button>
 
         <button
           type="button"
-          className={`flex-1 py-2 text-sm ${
-            mode === "signup"
+          className={
+            "flex-1 py-2 text-sm " +
+            (mode === "signup"
               ? "bg-gray-100 font-semibold"
-              : "bg-white"
-          }`}
-          onClick={() => switchMode("signup")}
+              : "bg-white")
+          }
+          onClick={() => changeMode("signup")}
         >
           Sign Up
         </button>
+
       </div>
 
-      {/* Password / OTP */}
-      <div className="flex mb-4 rounded-md overflow-hidden border text-sm">
+      <div className="flex mb-4 rounded-md overflow-hidden border">
+
         <button
           type="button"
-          className={`flex-1 py-2 ${
-            method === "password"
-              ? "bg-white font-semibold"
-              : "bg-gray-50 text-gray-500"
-          }`}
-          onClick={() => switchMethod("password")}
+          className={
+            "flex-1 py-2 text-sm " +
+            (method === "password"
+              ? "bg-gray-100 font-semibold"
+              : "bg-white text-gray-500")
+          }
+          onClick={() => changeMethod("password")}
         >
           Password
         </button>
 
         <button
           type="button"
-          className={`flex-1 py-2 ${
-            method === "otp"
-              ? "bg-white font-semibold"
-              : "bg-gray-50 text-gray-500"
-          }`}
-          onClick={() => switchMethod("otp")}
+          className={
+            "flex-1 py-2 text-sm " +
+            (method === "otp"
+              ? "bg-gray-100 font-semibold"
+              : "bg-white text-gray-500")
+          }
+          onClick={() => changeMethod("otp")}
         >
           OTP Code
         </button>
+
       </div>
 
-      {/* Error */}
       {error && (
         <div className="bg-red-50 text-red-700 text-sm rounded-md p-3 mb-3">
           {error}
         </div>
       )}
 
-      {/* Success Message */}
       {message && (
         <div className="bg-green-50 text-green-700 text-sm rounded-md p-3 mb-3">
           {message}
         </div>
       )}
 
-      {/* Signup Profile Fields */}
       {mode === "signup" && (
         <div className="grid grid-cols-2 gap-2 mb-3">
+
           <input
             className="col-span-2 border rounded-md px-3 py-2 text-sm"
             placeholder="Full name"
             value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
+            onChange={(event) =>
+              setFullName(event.target.value)
+            }
           />
 
           <input
             className="col-span-2 border rounded-md px-3 py-2 text-sm"
             placeholder="College / Organization"
             value={college}
-            onChange={(e) => setCollege(e.target.value)}
+            onChange={(event) =>
+              setCollege(event.target.value)
+            }
           />
 
           <input
             className="border rounded-md px-3 py-2 text-sm"
             placeholder="Branch (e.g. CSE)"
             value={branch}
-            onChange={(e) => setBranch(e.target.value)}
+            onChange={(event) =>
+              setBranch(event.target.value)
+            }
           />
 
           <input
             className="border rounded-md px-3 py-2 text-sm"
             placeholder="Year (1-4)"
             value={year}
-            onChange={(e) => setYear(e.target.value)}
+            onChange={(event) =>
+              setYear(event.target.value)
+            }
           />
+
         </div>
       )}
 
-      {/* Email */}
       <label className="block text-sm font-medium mb-1">
         Email
       </label>
@@ -434,13 +424,15 @@ export default function LoginPage() {
         className="w-full border rounded-md px-3 py-2 mb-3 text-sm"
         placeholder="you@college.edu"
         value={email}
-        onChange={(e) => setEmail(e.target.value)}
+        onChange={(event) =>
+          setEmail(event.target.value)
+        }
         disabled={otpSent}
       />
 
-      {/* PASSWORD METHOD */}
       {method === "password" && (
-        <>
+        <div>
+
           <label className="block text-sm font-medium mb-1">
             Password
           </label>
@@ -450,12 +442,14 @@ export default function LoginPage() {
             className="w-full border rounded-md px-3 py-2 mb-3 text-sm"
             placeholder="••••••••"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(event) =>
+              setPassword(event.target.value)
+            }
           />
 
-          {/* Sign In */}
           {mode === "signin" && (
-            <>
+            <div>
+
               <button
                 type="button"
                 onClick={handlePasswordSignIn}
@@ -472,11 +466,112 @@ export default function LoginPage() {
                 className="w-full text-sm text-blue-600 mt-3 disabled:opacity-50"
               >
                 {cooldown > 0
-                  ? `Please wait ${cooldown}s`
+                  ? "Please wait " + cooldown + "s"
                   : "Forgot password?"}
               </button>
-            </>
+
+            </div>
           )}
 
-          {/* Sign Up */}
-          {mode === "signup
+          {mode === "signup" && (
+            <button
+              type="button"
+              onClick={handlePasswordSignUp}
+              disabled={loading}
+              className="w-full bg-navy text-white py-2.5 rounded-md font-medium disabled:opacity-50"
+            >
+              {loading
+                ? "Creating account..."
+                : "Create account"}
+            </button>
+          )}
+
+        </div>
+      )}
+
+      {method === "otp" && (
+        <div>
+
+          {!otpSent && (
+            <button
+              type="button"
+              onClick={handleSendOtp}
+              disabled={loading || cooldown > 0}
+              className="w-full bg-navy text-white py-2.5 rounded-md font-medium disabled:opacity-50"
+            >
+              {loading
+                ? "Sending OTP..."
+                : cooldown > 0
+                ? "Please wait " + cooldown + "s"
+                : "Send OTP"}
+            </button>
+          )}
+
+          {otpSent && (
+            <div>
+
+              <label className="block text-sm font-medium mb-1">
+                Enter OTP
+              </label>
+
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                className="w-full border rounded-md px-3 py-2 mb-3 text-sm tracking-widest"
+                placeholder="6-digit OTP"
+                value={otp}
+                onChange={(event) => {
+                  const value = event.target.value
+                    .replace(/\D/g, "")
+                    .slice(0, 6);
+
+                  setOtp(value);
+                }}
+              />
+
+              <button
+                type="button"
+                onClick={handleVerifyOtp}
+                disabled={loading || otp.length !== 6}
+                className="w-full bg-navy text-white py-2.5 rounded-md font-medium disabled:opacity-50"
+              >
+                {loading ? "Verifying..." : "Verify OTP"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOtpSent(false);
+                  setOtp("");
+                  clearMessages();
+                }}
+                className="w-full text-sm text-gray-600 mt-3"
+              >
+                Change email
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSendOtp}
+                disabled={loading || cooldown > 0}
+                className="w-full text-sm text-blue-600 mt-2 disabled:opacity-50"
+              >
+                {cooldown > 0
+                  ? "Resend OTP in " + cooldown + "s"
+                  : "Resend OTP"}
+              </button>
+
+            </div>
+          )}
+
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 text-center mt-5">
+        By continuing, you agree to use CampusOpps responsibly.
+      </p>
+
+    </div>
+  );
+  }
